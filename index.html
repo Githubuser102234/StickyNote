@@ -91,27 +91,30 @@
     </div>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // Import the functions you need from the SDKs you need
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
         
-        // Set Firebase logging level to debug
-        setLogLevel('debug');
-
-        // Global variables provided by the Canvas environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // Firebase configuration hardcoded for GitHub Pages
+        const firebaseConfig = {
+          apiKey: "AIzaSyDPVDwxiJ6o8w5HbtBrXvdknj_T3fP94TQ",
+          authDomain: "stickynote-802f1.firebaseapp.com",
+          projectId: "stickynote-802f1",
+          storageBucket: "stickynote-802f1.firebasestorage.app",
+          messagingSenderId: "204450386545",
+          appId: "1:204450386545:web:4b9bdc6d0c22cb693ac1d0",
+          measurementId: "G-QD6T7048TQ"
+        };
+        
+        const noteTextarea = document.getElementById('note-text');
+        const shimmer = document.getElementById('shimmer');
+        const userIdSpan = document.getElementById('user-id');
 
         let db;
         let auth;
         let noteRef;
         let debouncedSave;
-
-        const noteTextarea = document.getElementById('note-text');
-        const shimmer = document.getElementById('shimmer');
-        const userIdSpan = document.getElementById('user-id');
 
         // Debounce function to limit Firestore writes
         function debounce(func, delay) {
@@ -124,26 +127,13 @@
 
         // Initialize Firebase and set up real-time listener
         const initializeFirebase = async () => {
-            if (!firebaseConfig) {
-                console.error("Firebase config is missing.");
-                shimmer.style.display = 'none';
-                noteTextarea.style.display = 'block';
-                noteTextarea.placeholder = 'Firebase config is missing. Cannot save data.';
-                noteTextarea.disabled = true;
-                return;
-            }
-
             try {
                 const app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
 
-                // Sign in with the provided token or anonymously
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                // Sign in anonymously to allow anyone to edit
+                await signInAnonymously(auth);
 
                 // Set up the listener for auth state changes
                 onAuthStateChanged(auth, (user) => {
@@ -152,8 +142,8 @@
                         userIdSpan.textContent = userId;
                         console.log("Authenticated as user:", userId);
 
-                        // Define the Firestore document path for public data
-                        const documentPath = `artifacts/${appId}/public/data/sticky-notes/main-note`;
+                        // Hardcoded path for public data, using the app's project ID
+                        const documentPath = `artifacts/${firebaseConfig.projectId}/public/data/sticky-notes/main-note`;
                         noteRef = doc(db, documentPath);
 
                         // Set up the real-time listener for the note content
@@ -168,7 +158,6 @@
                             } else {
                                 console.log("No document found, creating a new one.");
                                 noteTextarea.value = '';
-                                // Optionally create the document with a default value
                                 setDoc(noteRef, { text: "" });
                             }
                         }, (error) => {
