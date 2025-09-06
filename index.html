@@ -135,7 +135,7 @@
     <!-- Timestamp and expiration status for custom notes -->
     <div id="note-status" class="mt-4 text-center hidden">
         <p class="text-sm text-gray-700">Created on: <span id="created-at" class="font-bold"></span></p>
-        <p class="text-sm text-gray-700 mt-1">Expires on: <span id="expires-at" class="font-bold text-red-500"></span></p>
+        <p class="text-sm text-gray-700 mt-1">Expires on: <span id="expires-at" class="font-bold"></span></p>
     </div>
 
     <!-- User Information -->
@@ -167,7 +167,7 @@
             </div>
             
             <!-- Expiration -->
-            <div class="mb-6">
+            <div class="mb-4">
                 <label for="expiration-select" class="block text-gray-700 text-sm font-bold mb-2">Expiration:</label>
                 <select id="expiration-select" class="w-full border border-gray-300 rounded p-2">
                     <option value="none">None</option>
@@ -175,7 +175,15 @@
                     <option value="3">3 Days</option>
                     <option value="5">5 Days</option>
                     <option value="7">7 Days</option>
+                    <option value="custom">Custom</option>
                 </select>
+                <input type="number" id="custom-expiration-days" placeholder="Enter days" class="hidden mt-2 w-full border border-gray-300 rounded p-2 text-base font-sans">
+            </div>
+
+            <!-- Editable Checkbox -->
+            <div class="mb-6 flex items-center space-x-2">
+                <input type="checkbox" id="editable-checkbox" class="form-checkbox h-4 w-4 text-gray-600 rounded">
+                <label for="editable-checkbox" class="text-gray-700 text-sm font-bold">Editable after created</label>
             </div>
 
             <!-- Buttons -->
@@ -218,6 +226,8 @@
         const customNoteTextarea = document.getElementById('custom-note-text');
         const colorPalette = document.getElementById('color-palette');
         const expirationSelect = document.getElementById('expiration-select');
+        const customExpirationInput = document.getElementById('custom-expiration-days');
+        const editableCheckbox = document.getElementById('editable-checkbox');
         const noteStatus = document.getElementById('note-status');
         const createdAtSpan = document.getElementById('created-at');
         const expiresAtSpan = document.getElementById('expires-at');
@@ -260,18 +270,10 @@
                         console.log("Authenticated as user:", userId);
 
                         if (customId) {
-                            // This is a custom note, make it read-only
                             isCustomNote = true;
-                            noteTextarea.readOnly = true;
-                            noteTextarea.classList.add('read-only');
-                            noteContainer.classList.add('read-only');
                             noteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/custom-notes/${customId}`);
                             createNoteBtn.classList.add('hidden'); // Hide the create button on custom notes
                         } else {
-                            // This is the main, publicly editable note
-                            noteTextarea.readOnly = false;
-                            noteTextarea.classList.remove('read-only');
-                            noteContainer.classList.remove('read-only');
                             noteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/sticky-notes/main-note`);
                             noteStatus.classList.add('hidden'); // Hide status on main note
                         }
@@ -283,43 +285,57 @@
 
                             if (docSnap.exists()) {
                                 const data = docSnap.data();
-                                noteTextarea.value = data.text || '';
-                                if (data.color) {
-                                    noteContainer.style.backgroundColor = data.color;
-                                }
+                                const isNoteEditable = data.isEditable;
+                                const isExpired = data.expiresAt && Date.now() > data.expiresAt;
+
+                                noteContainer.style.backgroundColor = data.color || selectedColor;
 
                                 if (isCustomNote) {
                                     noteStatus.classList.remove('hidden');
                                     const createdAt = data.createdAt ? new Date(data.createdAt).toLocaleString() : 'N/A';
                                     createdAtSpan.textContent = createdAt;
 
-                                    if (data.expiresAt) {
-                                        const expiresAt = data.expiresAt;
-                                        const now = Date.now();
-                                        if (now > expiresAt) {
-                                            noteTextarea.value = 'This note has expired.';
-                                            noteTextarea.disabled = true;
-                                            expiresAtSpan.textContent = 'EXPIRED';
-                                            expiresAtSpan.classList.add('text-red-500');
-                                            expiresAtSpan.classList.remove('text-gray-700');
+                                    if (isExpired) {
+                                        noteTextarea.value = 'This note has expired and is no longer editable.';
+                                        noteTextarea.readOnly = true;
+                                        noteTextarea.classList.add('read-only');
+                                        noteTextarea.disabled = true;
+                                        expiresAtSpan.textContent = 'EXPIRED';
+                                        expiresAtSpan.classList.add('text-red-500');
+                                        expiresAtSpan.classList.remove('text-gray-700');
+                                    } else {
+                                        noteTextarea.value = data.text || '';
+                                        const readOnly = !(isNoteEditable);
+                                        noteTextarea.readOnly = readOnly;
+                                        if (readOnly) {
+                                            noteTextarea.classList.add('read-only');
                                         } else {
-                                            const expirationDate = new Date(expiresAt).toLocaleString();
+                                            noteTextarea.classList.remove('read-only');
+                                        }
+
+                                        if (data.expiresAt) {
+                                            const expirationDate = new Date(data.expiresAt).toLocaleString();
                                             expiresAtSpan.textContent = expirationDate;
                                             expiresAtSpan.classList.add('text-gray-700');
                                             expiresAtSpan.classList.remove('text-red-500');
+                                        } else {
+                                            expiresAtSpan.textContent = 'Never';
+                                            expiresAtSpan.classList.add('text-gray-700');
+                                            expiresAtSpan.classList.remove('text-red-500');
                                         }
-                                    } else {
-                                        expiresAtSpan.textContent = 'Never';
-                                        expiresAtSpan.classList.add('text-gray-700');
-                                        expiresAtSpan.classList.remove('text-red-500');
                                     }
+                                } else {
+                                    // Main note is always editable
+                                    noteTextarea.value = data.text || '';
+                                    noteTextarea.readOnly = false;
+                                    noteTextarea.classList.remove('read-only');
                                 }
 
                                 console.log("Document data received:", data.text);
                             } else {
                                 console.log("No document found, creating a new one.");
                                 noteTextarea.value = '';
-                                setDoc(noteRef, { text: "", color: selectedColor, createdAt: Date.now() });
+                                setDoc(noteRef, { text: "", color: selectedColor, isEditable: true, createdAt: Date.now(), expiresAt: null });
                             }
                         }, (error) => {
                             shimmer.style.display = 'none';
@@ -349,13 +365,23 @@
 
         // Save the note content to Firestore
         const saveNote = async () => {
-            if (!db || !noteRef || isCustomNote) {
-                console.warn("Firestore not initialized or it is a custom note. Cannot save.");
+            // Only save if it's the main note, or a custom note that is marked as editable.
+            if (!db || !noteRef) {
+                console.warn("Firestore not initialized. Cannot save.");
                 return;
             }
             try {
-                await setDoc(noteRef, { text: noteTextarea.value }, { merge: true });
-                console.log("Note saved successfully.");
+                // Get the current document to check if it's editable
+                const docSnap = await getDoc(noteRef);
+                const data = docSnap.exists() ? docSnap.data() : {};
+                const isNoteEditable = data.isEditable;
+
+                if (!isCustomNote || (isCustomNote && isNoteEditable)) {
+                    await setDoc(noteRef, { text: noteTextarea.value }, { merge: true });
+                    console.log("Note saved successfully.");
+                } else {
+                    console.warn("This note is not editable. Changes will not be saved.");
+                }
             } catch (error) {
                 console.error("Error saving note:", error);
             }
@@ -385,25 +411,43 @@
             }
         });
 
+        // Show/hide custom expiration input based on dropdown selection
+        expirationSelect.addEventListener('change', (event) => {
+            if (event.target.value === 'custom') {
+                customExpirationInput.classList.remove('hidden');
+            } else {
+                customExpirationInput.classList.add('hidden');
+            }
+        });
+
         createBtn.addEventListener('click', async () => {
             const noteContent = customNoteTextarea.value;
             const newNoteId = crypto.randomUUID();
             const newNoteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/custom-notes/${newNoteId}`);
-
+            
             // Calculate expiration timestamp
             let expiresAt = null;
-            const expirationDays = parseInt(expirationSelect.value);
-            if (!isNaN(expirationDays)) {
-                const now = Date.now();
-                const millisecondsInDay = 24 * 60 * 60 * 1000;
-                expiresAt = now + (expirationDays * millisecondsInDay);
+            const expirationOption = expirationSelect.value;
+            const millisecondsInDay = 24 * 60 * 60 * 1000;
+            const now = Date.now();
+
+            if (expirationOption === 'custom') {
+                const customDays = parseInt(customExpirationInput.value);
+                if (!isNaN(customDays) && customDays > 0) {
+                    expiresAt = now + (customDays * millisecondsInDay);
+                }
+            } else if (expirationOption !== 'none') {
+                expiresAt = now + (parseInt(expirationOption) * millisecondsInDay);
             }
+
+            const isEditable = editableCheckbox.checked;
 
             try {
                 await setDoc(newNoteRef, {
                     text: noteContent,
                     color: selectedColor,
-                    createdAt: Date.now(),
+                    isEditable: isEditable,
+                    createdAt: now,
                     expiresAt: expiresAt
                 });
                 console.log("Custom note created with ID:", newNoteId);
