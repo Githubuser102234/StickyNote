@@ -18,6 +18,7 @@
             min-height: 100vh;
             padding: 1rem;
             flex-direction: column;
+            position: relative;
         }
         .note {
             width: 100%;
@@ -32,6 +33,9 @@
             min-height: 300px;
             display: flex;
             flex-direction: column;
+        }
+        .note.read-only {
+            cursor: default;
         }
 
         @keyframes fadeIn {
@@ -65,6 +69,9 @@
             font-size: 1.25rem;
             color: #333;
         }
+        textarea.read-only {
+            cursor: default;
+        }
 
         .user-info {
             font-size: 0.875rem;
@@ -72,12 +79,52 @@
             margin-top: 1rem;
             text-align: center;
         }
+        
+        /* Modal Styles */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: #fff3c9;
+            border-radius: 12px;
+            padding: 2rem;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            position: relative;
+        }
+        .color-palette button {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin: 5px;
+            border: 3px solid transparent;
+            transition: all 0.2s;
+        }
+        .color-palette button.selected {
+            border-color: #000;
+            transform: scale(1.1);
+        }
     </style>
 </head>
 <body class="font-sans">
 
+    <!-- Button for creating custom sticky notes -->
+    <button id="create-note-btn" class="absolute top-4 right-4 bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-full shadow-lg transition-transform transform hover:scale-105">
+        Create Custom Sticky Note
+    </button>
+
     <!-- Main Note Container -->
-    <div class="note">
+    <div id="sticky-note" class="note">
         <!-- Shimmer Placeholder (initially shown) -->
         <div id="shimmer" class="shimmer-wrapper"></div>
         
@@ -88,6 +135,41 @@
     <!-- User Information -->
     <div class="user-info">
         <p>Your User ID: <span id="user-id" class="font-mono text-xs text-gray-700">Loading...</span></p>
+    </div>
+
+    <!-- Custom Note Creation Modal -->
+    <div id="create-note-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 class="text-2xl font-bold mb-4">Create a Custom Note</h2>
+            
+            <!-- Color Selection -->
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Note Color:</label>
+                <div id="color-palette" class="color-palette flex flex-wrap">
+                    <button data-color="#fff3c9" class="bg-[#fff3c9] selected"></button>
+                    <button data-color="#c9f1ff" class="bg-[#c9f1ff]"></button>
+                    <button data-color="#d9ffc9" class="bg-[#d9ffc9]"></button>
+                    <button data-color="#ffc9d9" class="bg-[#ffc9d9]"></button>
+                    <button data-color="#ffc9f1" class="bg-[#ffc9f1]"></button>
+                </div>
+            </div>
+
+            <!-- Note Content -->
+            <div class="mb-4">
+                <label for="custom-note-text" class="block text-gray-700 text-sm font-bold mb-2">Note Content:</label>
+                <textarea id="custom-note-text" class="w-full h-48 border border-gray-300 rounded p-2 text-base font-sans resize-none" placeholder="Write your custom note here..."></textarea>
+            </div>
+
+            <!-- Buttons -->
+            <div class="flex justify-end space-x-4">
+                <button id="cancel-create-btn" class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-full">
+                    Cancel
+                </button>
+                <button id="create-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full">
+                    Create Note
+                </button>
+            </div>
+        </div>
     </div>
 
     <script type="module">
@@ -107,14 +189,23 @@
           measurementId: "G-QD6T7048TQ"
         };
         
+        const noteContainer = document.getElementById('sticky-note');
         const noteTextarea = document.getElementById('note-text');
         const shimmer = document.getElementById('shimmer');
         const userIdSpan = document.getElementById('user-id');
+        const createNoteBtn = document.getElementById('create-note-btn');
+        const createNoteModal = document.getElementById('create-note-modal');
+        const cancelCreateBtn = document.getElementById('cancel-create-btn');
+        const createBtn = document.getElementById('create-btn');
+        const customNoteTextarea = document.getElementById('custom-note-text');
+        const colorPalette = document.getElementById('color-palette');
 
         let db;
         let auth;
         let noteRef;
         let debouncedSave;
+        let isCustomNote = false;
+        let selectedColor = '#fff3c9';
 
         // Debounce function to limit Firestore writes
         function debounce(func, delay) {
@@ -132,7 +223,11 @@
                 auth = getAuth(app);
                 db = getFirestore(app);
 
-                // Sign in anonymously to allow anyone to edit
+                // Check for a custom ID in the URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const customId = urlParams.get('customid');
+
+                // Sign in anonymously to allow anyone to edit the main note or view custom notes
                 await signInAnonymously(auth);
 
                 // Set up the listener for auth state changes
@@ -142,27 +237,40 @@
                         userIdSpan.textContent = userId;
                         console.log("Authenticated as user:", userId);
 
-                        // Hardcoded path for public data, using the app's project ID
-                        const documentPath = `artifacts/${firebaseConfig.projectId}/public/data/sticky-notes/main-note`;
-                        noteRef = doc(db, documentPath);
-
+                        if (customId) {
+                            // This is a custom note, make it read-only
+                            isCustomNote = true;
+                            noteTextarea.readOnly = true;
+                            noteTextarea.classList.add('read-only');
+                            noteContainer.classList.add('read-only');
+                            noteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/custom-notes/${customId}`);
+                            createNoteBtn.classList.add('hidden'); // Hide the create button on custom notes
+                        } else {
+                            // This is the main, publicly editable note
+                            noteTextarea.readOnly = false;
+                            noteTextarea.classList.remove('read-only');
+                            noteContainer.classList.remove('read-only');
+                            noteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/sticky-notes/main-note`);
+                        }
+                        
                         // Set up the real-time listener for the note content
                         onSnapshot(noteRef, (docSnap) => {
-                            // Hide the shimmer on any successful snapshot
                             shimmer.style.display = 'none';
                             noteTextarea.style.display = 'block';
 
                             if (docSnap.exists()) {
                                 const data = docSnap.data();
                                 noteTextarea.value = data.text || '';
+                                if (data.color) {
+                                    noteContainer.style.backgroundColor = data.color;
+                                }
                                 console.log("Document data received:", data.text);
                             } else {
                                 console.log("No document found, creating a new one.");
                                 noteTextarea.value = '';
-                                setDoc(noteRef, { text: "" });
+                                setDoc(noteRef, { text: "", color: selectedColor });
                             }
                         }, (error) => {
-                            // Hide the shimmer on error as well
                             shimmer.style.display = 'none';
                             noteTextarea.style.display = 'block';
                             console.error("Error listening to Firestore:", error);
@@ -190,12 +298,12 @@
 
         // Save the note content to Firestore
         const saveNote = async () => {
-            if (!db || !noteRef) {
-                console.warn("Firestore not initialized. Cannot save.");
+            if (!db || !noteRef || isCustomNote) {
+                console.warn("Firestore not initialized or it is a custom note. Cannot save.");
                 return;
             }
             try {
-                await setDoc(noteRef, { text: noteTextarea.value });
+                await setDoc(noteRef, { text: noteTextarea.value }, { merge: true });
                 console.log("Note saved successfully.");
             } catch (error) {
                 console.error("Error saving note:", error);
@@ -205,8 +313,45 @@
         // Debounce the save function to prevent a write on every keystroke
         debouncedSave = debounce(saveNote, 500);
 
-        // Add event listener for text input
+        // Add event listener for text input on the main note
         noteTextarea.addEventListener('input', debouncedSave);
+
+        // Modal and Button Logic
+        createNoteBtn.addEventListener('click', () => {
+            createNoteModal.classList.remove('hidden');
+        });
+
+        cancelCreateBtn.addEventListener('click', () => {
+            createNoteModal.classList.add('hidden');
+        });
+
+        colorPalette.addEventListener('click', (event) => {
+            const target = event.target;
+            if (target.tagName === 'BUTTON') {
+                document.querySelectorAll('#color-palette button').forEach(btn => btn.classList.remove('selected'));
+                target.classList.add('selected');
+                selectedColor = target.dataset.color;
+            }
+        });
+
+        createBtn.addEventListener('click', async () => {
+            const noteContent = customNoteTextarea.value;
+            const newNoteId = crypto.randomUUID();
+            const newNoteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/custom-notes/${newNoteId}`);
+
+            try {
+                await setDoc(newNoteRef, {
+                    text: noteContent,
+                    color: selectedColor,
+                    createdAt: new Date()
+                });
+                console.log("Custom note created with ID:", newNoteId);
+                const redirectUrl = `https://githubuser102234.github.io/StickyNote/?customid=${newNoteId}`;
+                window.location.href = redirectUrl;
+            } catch (error) {
+                console.error("Error creating custom note:", error);
+            }
+        });
 
         window.onload = initializeFirebase;
     </script>
