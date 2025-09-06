@@ -148,6 +148,7 @@
 
                         // Set up the real-time listener for the note content
                         onSnapshot(noteRef, (docSnap) => {
+                            // Hide the shimmer on any successful snapshot
                             shimmer.style.display = 'none';
                             noteTextarea.style.display = 'block';
 
@@ -161,6 +162,9 @@
                                 setDoc(noteRef, { text: "" });
                             }
                         }, (error) => {
+                            // Hide the shimmer on error as well
+                            shimmer.style.display = 'none';
+                            noteTextarea.style.display = 'block';
                             console.error("Error listening to Firestore:", error);
                             noteTextarea.placeholder = 'Failed to load note.';
                             noteTextarea.disabled = true;
