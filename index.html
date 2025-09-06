@@ -181,9 +181,25 @@
             </div>
 
             <!-- Editable Checkbox -->
-            <div class="mb-6 flex items-center space-x-2">
-                <input type="checkbox" id="editable-checkbox" class="form-checkbox h-4 w-4 text-gray-600 rounded">
-                <label for="editable-checkbox" class="text-gray-700 text-sm font-bold">Editable after created</label>
+            <div class="mb-6">
+                <div class="flex items-center space-x-2">
+                    <input type="checkbox" id="editable-checkbox" class="form-checkbox h-4 w-4 text-gray-600 rounded">
+                    <label for="editable-checkbox" class="text-gray-700 text-sm font-bold">Editable after created</label>
+                </div>
+                <!-- New Editable By options -->
+                <div id="editable-options" class="mt-4 hidden">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Editable By:</label>
+                    <div class="flex items-center space-x-4">
+                        <div class="flex items-center">
+                            <input type="radio" id="editable-by-me" name="editable-by" value="me" class="form-radio" checked>
+                            <label for="editable-by-me" class="ml-2">Only Me</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="radio" id="editable-by-everyone" name="editable-by" value="everyone" class="form-radio">
+                            <label for="editable-by-everyone" class="ml-2">Everyone</label>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Buttons -->
@@ -202,7 +218,7 @@
         // Import the functions you need from the SDKs you need
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        import { getFirestore, doc, onSnapshot, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
         
         // Firebase configuration hardcoded for GitHub Pages
         const firebaseConfig = {
@@ -228,6 +244,9 @@
         const expirationSelect = document.getElementById('expiration-select');
         const customExpirationInput = document.getElementById('custom-expiration-days');
         const editableCheckbox = document.getElementById('editable-checkbox');
+        const editableOptionsDiv = document.getElementById('editable-options');
+        const editableByMeRadio = document.getElementById('editable-by-me');
+        const editableByEveryoneRadio = document.getElementById('editable-by-everyone');
         const noteStatus = document.getElementById('note-status');
         const createdAtSpan = document.getElementById('created-at');
         const expiresAtSpan = document.getElementById('expires-at');
@@ -287,7 +306,26 @@
                                 const data = docSnap.data();
                                 const isNoteEditable = data.isEditable;
                                 const isExpired = data.expiresAt && Date.now() > data.expiresAt;
+                                const editableBy = data.editableBy;
+                                const ownerId = data.ownerId;
+                                let readOnly = true;
 
+                                // Determine if the note is editable based on the new fields
+                                if (!isExpired && isNoteEditable) {
+                                    if (editableBy === 'me' && ownerId === auth.currentUser.uid) {
+                                        readOnly = false;
+                                    } else if (editableBy === 'everyone') {
+                                        readOnly = false;
+                                    }
+                                }
+
+                                noteTextarea.readOnly = readOnly;
+                                if (readOnly) {
+                                    noteTextarea.classList.add('read-only');
+                                } else {
+                                    noteTextarea.classList.remove('read-only');
+                                }
+                                
                                 noteContainer.style.backgroundColor = data.color || selectedColor;
 
                                 if (isCustomNote) {
@@ -297,22 +335,12 @@
 
                                     if (isExpired) {
                                         noteTextarea.value = 'This note has expired and is no longer editable.';
-                                        noteTextarea.readOnly = true;
-                                        noteTextarea.classList.add('read-only');
                                         noteTextarea.disabled = true;
                                         expiresAtSpan.textContent = 'EXPIRED';
                                         expiresAtSpan.classList.add('text-red-500');
                                         expiresAtSpan.classList.remove('text-gray-700');
                                     } else {
                                         noteTextarea.value = data.text || '';
-                                        const readOnly = !(isNoteEditable);
-                                        noteTextarea.readOnly = readOnly;
-                                        if (readOnly) {
-                                            noteTextarea.classList.add('read-only');
-                                        } else {
-                                            noteTextarea.classList.remove('read-only');
-                                        }
-
                                         if (data.expiresAt) {
                                             const expirationDate = new Date(data.expiresAt).toLocaleString();
                                             expiresAtSpan.textContent = expirationDate;
@@ -335,7 +363,7 @@
                             } else {
                                 console.log("No document found, creating a new one.");
                                 noteTextarea.value = '';
-                                setDoc(noteRef, { text: "", color: selectedColor, isEditable: true, createdAt: Date.now(), expiresAt: null });
+                                setDoc(noteRef, { text: "", color: selectedColor, isEditable: true, editableBy: 'everyone', ownerId: null, createdAt: Date.now(), expiresAt: null });
                             }
                         }, (error) => {
                             shimmer.style.display = 'none';
@@ -365,22 +393,28 @@
 
         // Save the note content to Firestore
         const saveNote = async () => {
-            // Only save if it's the main note, or a custom note that is marked as editable.
             if (!db || !noteRef) {
                 console.warn("Firestore not initialized. Cannot save.");
                 return;
             }
             try {
-                // Get the current document to check if it's editable
                 const docSnap = await getDoc(noteRef);
                 const data = docSnap.exists() ? docSnap.data() : {};
+                
                 const isNoteEditable = data.isEditable;
+                const editableBy = data.editableBy;
+                const ownerId = data.ownerId;
+                const isExpired = data.expiresAt && Date.now() > data.expiresAt;
 
-                if (!isCustomNote || (isCustomNote && isNoteEditable)) {
+                if (!isExpired && isNoteEditable) {
+                    if (editableBy === 'me' && ownerId !== auth.currentUser.uid) {
+                        console.warn("Cannot save: This 'Only Me' note can only be edited by its creator.");
+                        return;
+                    }
                     await setDoc(noteRef, { text: noteTextarea.value }, { merge: true });
                     console.log("Note saved successfully.");
                 } else {
-                    console.warn("This note is not editable. Changes will not be saved.");
+                    console.warn("Cannot save: This note is not editable.");
                 }
             } catch (error) {
                 console.error("Error saving note:", error);
@@ -390,7 +424,7 @@
         // Debounce the save function to prevent a write on every keystroke
         debouncedSave = debounce(saveNote, 500);
 
-        // Add event listener for text input on the main note
+        // Add event listener for text input on the note
         noteTextarea.addEventListener('input', debouncedSave);
 
         // Modal and Button Logic
@@ -420,6 +454,15 @@
             }
         });
 
+        // Show/hide editable by options
+        editableCheckbox.addEventListener('change', (event) => {
+            if (event.target.checked) {
+                editableOptionsDiv.classList.remove('hidden');
+            } else {
+                editableOptionsDiv.classList.add('hidden');
+            }
+        });
+
         createBtn.addEventListener('click', async () => {
             const noteContent = customNoteTextarea.value;
             const newNoteId = crypto.randomUUID();
@@ -441,12 +484,16 @@
             }
 
             const isEditable = editableCheckbox.checked;
+            const editableBy = isEditable ? (editableByMeRadio.checked ? 'me' : 'everyone') : null;
+            const ownerId = isEditable && editableBy === 'me' ? auth.currentUser.uid : null;
 
             try {
                 await setDoc(newNoteRef, {
                     text: noteContent,
                     color: selectedColor,
                     isEditable: isEditable,
+                    editableBy: editableBy,
+                    ownerId: ownerId,
                     createdAt: now,
                     expiresAt: expiresAt
                 });
