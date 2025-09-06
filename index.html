@@ -132,6 +132,12 @@
         <textarea id="note-text" class="hidden" placeholder="Start writing here..."></textarea>
     </div>
 
+    <!-- Timestamp and expiration status for custom notes -->
+    <div id="note-status" class="mt-4 text-center hidden">
+        <p class="text-sm text-gray-700">Created on: <span id="created-at" class="font-bold"></span></p>
+        <p class="text-sm text-gray-700 mt-1">Expires on: <span id="expires-at" class="font-bold text-red-500"></span></p>
+    </div>
+
     <!-- User Information -->
     <div class="user-info">
         <p>Your User ID: <span id="user-id" class="font-mono text-xs text-gray-700">Loading...</span></p>
@@ -158,6 +164,18 @@
             <div class="mb-4">
                 <label for="custom-note-text" class="block text-gray-700 text-sm font-bold mb-2">Note Content:</label>
                 <textarea id="custom-note-text" class="w-full h-48 border border-gray-300 rounded p-2 text-base font-sans resize-none" placeholder="Write your custom note here..."></textarea>
+            </div>
+            
+            <!-- Expiration -->
+            <div class="mb-6">
+                <label for="expiration-select" class="block text-gray-700 text-sm font-bold mb-2">Expiration:</label>
+                <select id="expiration-select" class="w-full border border-gray-300 rounded p-2">
+                    <option value="none">None</option>
+                    <option value="1">1 Day</option>
+                    <option value="3">3 Days</option>
+                    <option value="5">5 Days</option>
+                    <option value="7">7 Days</option>
+                </select>
             </div>
 
             <!-- Buttons -->
@@ -199,6 +217,10 @@
         const createBtn = document.getElementById('create-btn');
         const customNoteTextarea = document.getElementById('custom-note-text');
         const colorPalette = document.getElementById('color-palette');
+        const expirationSelect = document.getElementById('expiration-select');
+        const noteStatus = document.getElementById('note-status');
+        const createdAtSpan = document.getElementById('created-at');
+        const expiresAtSpan = document.getElementById('expires-at');
 
         let db;
         let auth;
@@ -251,6 +273,7 @@
                             noteTextarea.classList.remove('read-only');
                             noteContainer.classList.remove('read-only');
                             noteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/sticky-notes/main-note`);
+                            noteStatus.classList.add('hidden'); // Hide status on main note
                         }
                         
                         // Set up the real-time listener for the note content
@@ -264,11 +287,39 @@
                                 if (data.color) {
                                     noteContainer.style.backgroundColor = data.color;
                                 }
+
+                                if (isCustomNote) {
+                                    noteStatus.classList.remove('hidden');
+                                    const createdAt = data.createdAt ? new Date(data.createdAt).toLocaleString() : 'N/A';
+                                    createdAtSpan.textContent = createdAt;
+
+                                    if (data.expiresAt) {
+                                        const expiresAt = data.expiresAt;
+                                        const now = Date.now();
+                                        if (now > expiresAt) {
+                                            noteTextarea.value = 'This note has expired.';
+                                            noteTextarea.disabled = true;
+                                            expiresAtSpan.textContent = 'EXPIRED';
+                                            expiresAtSpan.classList.add('text-red-500');
+                                            expiresAtSpan.classList.remove('text-gray-700');
+                                        } else {
+                                            const expirationDate = new Date(expiresAt).toLocaleString();
+                                            expiresAtSpan.textContent = expirationDate;
+                                            expiresAtSpan.classList.add('text-gray-700');
+                                            expiresAtSpan.classList.remove('text-red-500');
+                                        }
+                                    } else {
+                                        expiresAtSpan.textContent = 'Never';
+                                        expiresAtSpan.classList.add('text-gray-700');
+                                        expiresAtSpan.classList.remove('text-red-500');
+                                    }
+                                }
+
                                 console.log("Document data received:", data.text);
                             } else {
                                 console.log("No document found, creating a new one.");
                                 noteTextarea.value = '';
-                                setDoc(noteRef, { text: "", color: selectedColor });
+                                setDoc(noteRef, { text: "", color: selectedColor, createdAt: Date.now() });
                             }
                         }, (error) => {
                             shimmer.style.display = 'none';
@@ -339,11 +390,21 @@
             const newNoteId = crypto.randomUUID();
             const newNoteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/custom-notes/${newNoteId}`);
 
+            // Calculate expiration timestamp
+            let expiresAt = null;
+            const expirationDays = parseInt(expirationSelect.value);
+            if (!isNaN(expirationDays)) {
+                const now = Date.now();
+                const millisecondsInDay = 24 * 60 * 60 * 1000;
+                expiresAt = now + (expirationDays * millisecondsInDay);
+            }
+
             try {
                 await setDoc(newNoteRef, {
                     text: noteContent,
                     color: selectedColor,
-                    createdAt: new Date()
+                    createdAt: Date.now(),
+                    expiresAt: expiresAt
                 });
                 console.log("Custom note created with ID:", newNoteId);
                 const redirectUrl = `https://githubuser102234.github.io/StickyNote/?customid=${newNoteId}`;
