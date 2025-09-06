@@ -136,6 +136,7 @@
     <div id="note-status" class="mt-4 text-center hidden">
         <p class="text-sm text-gray-700">Created on: <span id="created-at" class="font-bold"></span></p>
         <p class="text-sm text-gray-700 mt-1">Expires on: <span id="expires-at" class="font-bold"></span></p>
+        <p class="text-sm text-gray-700 mt-1" id="permission-status"></p>
     </div>
 
     <!-- User Information -->
@@ -250,6 +251,7 @@
         const noteStatus = document.getElementById('note-status');
         const createdAtSpan = document.getElementById('created-at');
         const expiresAtSpan = document.getElementById('expires-at');
+        const permissionStatusSpan = document.getElementById('permission-status');
 
         let db;
         let auth;
@@ -309,16 +311,25 @@
                                 const editableBy = data.editableBy;
                                 const ownerId = data.ownerId;
                                 let readOnly = true;
+                                let permissionMessage = '';
 
                                 // Determine if the note is editable based on the new fields
                                 if (!isExpired && isNoteEditable) {
                                     if (editableBy === 'me' && ownerId === auth.currentUser.uid) {
                                         readOnly = false;
+                                        permissionMessage = 'This note is editable only by you (the Creator).';
                                     } else if (editableBy === 'everyone') {
                                         readOnly = false;
+                                        permissionMessage = 'This note can be edited by everyone.';
+                                    } else {
+                                        permissionMessage = 'This note is Read-Only and can only be edited by the Creator.';
                                     }
+                                } else if (!isNoteEditable) {
+                                    permissionMessage = 'This note has been set as not editable after creation.';
+                                } else if (isExpired) {
+                                    permissionMessage = '';
                                 }
-
+                                
                                 noteTextarea.readOnly = readOnly;
                                 if (readOnly) {
                                     noteTextarea.classList.add('read-only');
@@ -339,6 +350,7 @@
                                         expiresAtSpan.textContent = 'EXPIRED';
                                         expiresAtSpan.classList.add('text-red-500');
                                         expiresAtSpan.classList.remove('text-gray-700');
+                                        permissionStatusSpan.textContent = '';
                                     } else {
                                         noteTextarea.value = data.text || '';
                                         if (data.expiresAt) {
@@ -351,6 +363,7 @@
                                             expiresAtSpan.classList.add('text-gray-700');
                                             expiresAtSpan.classList.remove('text-red-500');
                                         }
+                                        permissionStatusSpan.textContent = permissionMessage;
                                     }
                                 } else {
                                     // Main note is always editable
@@ -413,6 +426,10 @@
                     }
                     await setDoc(noteRef, { text: noteTextarea.value }, { merge: true });
                     console.log("Note saved successfully.");
+                } else if (!isCustomNote) {
+                    // This is the main note, always editable
+                    await setDoc(noteRef, { text: noteTextarea.value }, { merge: true });
+                    console.log("Main note saved successfully.");
                 } else {
                     console.warn("Cannot save: This note is not editable.");
                 }
