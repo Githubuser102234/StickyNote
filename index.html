@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collaborative Sticky Note</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Permanent Marker', cursive;
+            background-color: #f3e5c9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+            flex-direction: column;
+        }
+        .note {
+            width: 100%;
+            max-width: 500px;
+            background-color: #fff3c9;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            transform: rotate(-2deg);
+            position: relative;
+            animation: fadeIn 0.5s ease-in-out;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px) rotate(-2deg); }
+            to { opacity: 1; transform: translateY(0) rotate(-2deg); }
+        }
+
+        .shimmer-wrapper {
+            width: 100%;
+            min-height: 250px;
+            background: linear-gradient(to right, #f6f7f8 0%, #edeef1 20%, #f6f7f8 40%);
+            background-size: 800px 104px;
+            animation: shimmer 1.5s infinite linear;
+            border-radius: 8px;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -468px 0; }
+            100% { background-position: 468px 0; }
+        }
+
+        textarea {
+            background-color: transparent;
+            width: 100%;
+            flex-grow: 1;
+            resize: none;
+            line-height: 1.5;
+            padding: 0;
+            border: none;
+            outline: none;
+            font-size: 1.25rem;
+            color: #333;
+        }
+
+        .user-info {
+            font-size: 0.875rem;
+            color: #4a5568;
+            margin-top: 1rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body class="font-sans">
+
+    <!-- Main Note Container -->
+    <div class="note">
+        <!-- Shimmer Placeholder (initially shown) -->
+        <div id="shimmer" class="shimmer-wrapper"></div>
+        
+        <!-- Note Text Area (initially hidden) -->
+        <textarea id="note-text" class="hidden" placeholder="Start writing here..."></textarea>
+    </div>
+
+    <!-- User Information -->
+    <div class="user-info">
+        <p>Your User ID: <span id="user-id" class="font-mono text-xs text-gray-700">Loading...</span></p>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Set Firebase logging level to debug
+        setLogLevel('debug');
+
+        // Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db;
+        let auth;
+        let noteRef;
+        let debouncedSave;
+
+        const noteTextarea = document.getElementById('note-text');
+        const shimmer = document.getElementById('shimmer');
+        const userIdSpan = document.getElementById('user-id');
+
+        // Debounce function to limit Firestore writes
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+
+        // Initialize Firebase and set up real-time listener
+        const initializeFirebase = async () => {
+            if (!firebaseConfig) {
+                console.error("Firebase config is missing.");
+                shimmer.style.display = 'none';
+                noteTextarea.style.display = 'block';
+                noteTextarea.placeholder = 'Firebase config is missing. Cannot save data.';
+                noteTextarea.disabled = true;
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // Sign in with the provided token or anonymously
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // Set up the listener for auth state changes
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        const userId = user.uid;
+                        userIdSpan.textContent = userId;
+                        console.log("Authenticated as user:", userId);
+
+                        // Define the Firestore document path for public data
+                        const documentPath = `artifacts/${appId}/public/data/sticky-notes/main-note`;
+                        noteRef = doc(db, documentPath);
+
+                        // Set up the real-time listener for the note content
+                        onSnapshot(noteRef, (docSnap) => {
+                            shimmer.style.display = 'none';
+                            noteTextarea.style.display = 'block';
+
+                            if (docSnap.exists()) {
+                                const data = docSnap.data();
+                                noteTextarea.value = data.text || '';
+                                console.log("Document data received:", data.text);
+                            } else {
+                                console.log("No document found, creating a new one.");
+                                noteTextarea.value = '';
+                                // Optionally create the document with a default value
+                                setDoc(noteRef, { text: "" });
+                            }
+                        }, (error) => {
+                            console.error("Error listening to Firestore:", error);
+                            noteTextarea.placeholder = 'Failed to load note.';
+                            noteTextarea.disabled = true;
+                        });
+                    } else {
+                        console.log("Authentication failed.");
+                        userIdSpan.textContent = 'Failed to authenticate';
+                        shimmer.style.display = 'none';
+                        noteTextarea.style.display = 'block';
+                        noteTextarea.placeholder = 'Authentication failed. Cannot save.';
+                        noteTextarea.disabled = true;
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                shimmer.style.display = 'none';
+                noteTextarea.style.display = 'block';
+                noteTextarea.placeholder = 'Firebase initialization failed.';
+                noteTextarea.disabled = true;
+            }
+        };
+
+        // Save the note content to Firestore
+        const saveNote = async () => {
+            if (!db || !noteRef) {
+                console.warn("Firestore not initialized. Cannot save.");
+                return;
+            }
+            try {
+                await setDoc(noteRef, { text: noteTextarea.value });
+                console.log("Note saved successfully.");
+            } catch (error) {
+                console.error("Error saving note:", error);
+            }
+        };
+
+        // Debounce the save function to prevent a write on every keystroke
+        debouncedSave = debounce(saveNote, 500);
+
+        // Add event listener for text input
+        noteTextarea.addEventListener('input', debouncedSave);
+
+        window.onload = initializeFirebase;
+    </script>
+</body>
+</html>
+
