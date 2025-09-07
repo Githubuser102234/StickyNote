@@ -647,7 +647,7 @@
         };
 
         // Debounce the save function to prevent a write on every keystroke
-        debouncedSave = debounce(saveNote, 500);
+        debouncedSave = debounce(saveNote, 100);
 
         // Add event listener for text input on the note
         noteTextarea.addEventListener('input', debouncedSave);
