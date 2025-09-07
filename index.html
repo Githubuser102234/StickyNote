@@ -99,6 +99,8 @@
             padding: 2rem;
             width: 90%;
             max-width: 600px;
+            max-height: 80vh; /* Make it scrollable on smaller screens */
+            overflow-y: auto;
             box-shadow: 0 10px 20px rgba(0,0,0,0.2);
             position: relative;
         }
@@ -721,7 +723,9 @@
             });
             if (currentNoteData.visibility === 'specific') {
                 editSpecificUsersInputContainer.classList.remove('hidden');
-                editSpecificUsersInput.value = currentNoteData.allowedUsers ? currentNoteData.allowedUsers.join(', ') : '';
+                // Filter out the current user's ID before displaying it
+                const otherUsers = (currentNoteData.allowedUsers || []).filter(id => id !== auth.currentUser.uid);
+                editSpecificUsersInput.value = otherUsers.join(', ');
             } else {
                 editSpecificUsersInputContainer.classList.add('hidden');
             }
@@ -932,6 +936,7 @@
             let newAllowedUsers = [];
             if (newVisibility === 'specific') {
                 const enteredIds = editSpecificUsersInput.value.split(',').map(id => id.trim()).filter(id => id.length > 0);
+                // Ensure the current user's ID is always included
                 newAllowedUsers = [...new Set([auth.currentUser.uid, ...enteredIds])];
             } else if (newVisibility === 'me') {
                 newAllowedUsers.push(auth.currentUser.uid);
