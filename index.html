@@ -876,15 +876,14 @@
 
             const isEditable = editableCheckbox.checked;
             const editableBy = isEditable ? (editableByMeRadio.checked ? 'me' : 'everyone') : null;
-            const ownerId = isEditable && editableBy === 'me' ? auth.currentUser.uid : null;
 
             // Get visibility and allowed users
             const visibility = document.querySelector('input[name="note-visibility"]:checked').value;
             let allowedUsers = [];
             if (visibility === 'specific') {
-                allowedUsers = specificUsersInput.value.split(',').map(id => id.trim()).filter(id => id.length > 0);
-            }
-            if (visibility === 'me') {
+                const enteredIds = specificUsersInput.value.split(',').map(id => id.trim()).filter(id => id.length > 0);
+                allowedUsers = [...new Set([auth.currentUser.uid, ...enteredIds])];
+            } else if (visibility === 'me') {
                 allowedUsers.push(auth.currentUser.uid);
             }
 
@@ -932,7 +931,8 @@
             const newVisibility = document.querySelector('input[name="edit-note-visibility"]:checked').value;
             let newAllowedUsers = [];
             if (newVisibility === 'specific') {
-                newAllowedUsers = editSpecificUsersInput.value.split(',').map(id => id.trim()).filter(id => id.length > 0);
+                const enteredIds = editSpecificUsersInput.value.split(',').map(id => id.trim()).filter(id => id.length > 0);
+                newAllowedUsers = [...new Set([auth.currentUser.uid, ...enteredIds])];
             } else if (newVisibility === 'me') {
                 newAllowedUsers.push(auth.currentUser.uid);
             }
