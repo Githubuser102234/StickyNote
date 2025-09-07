@@ -136,9 +136,9 @@
         <!-- Note Text Area (initially hidden) -->
         <textarea id="note-text" class="hidden" placeholder="Start writing here..."></textarea>
 
-        <!-- Note not found message -->
-        <div id="note-not-found" class="hidden text-center text-red-500 font-bold mt-4">
-            This note does not exist.
+        <!-- Note not found or private message -->
+        <div id="note-message" class="hidden text-center text-red-500 font-bold mt-4">
+            <!-- This will display "Note does not exist." or "Note is private." -->
         </div>
     </div>
 
@@ -213,6 +213,28 @@
                 </div>
             </div>
 
+            <!-- Note Visibility Options -->
+            <div class="mb-6">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Note Visibility:</label>
+                <div class="flex flex-col space-y-2">
+                    <div class="flex items-center">
+                        <input type="radio" id="visibility-me" name="note-visibility" value="me" class="form-radio" checked>
+                        <label for="visibility-me" class="ml-2">Only Me</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="radio" id="visibility-specific" name="note-visibility" value="specific" class="form-radio">
+                        <label for="visibility-specific" class="ml-2">Specific User IDs</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="radio" id="visibility-everyone" name="note-visibility" value="everyone" class="form-radio">
+                        <label for="visibility-everyone" class="ml-2">Everyone</label>
+                    </div>
+                </div>
+                <div id="specific-users-input-container" class="hidden mt-2">
+                    <textarea id="specific-users-input" placeholder="Enter comma-separated user IDs" class="w-full h-24 border border-gray-300 rounded p-2 text-sm font-sans resize-none"></textarea>
+                </div>
+            </div>
+
             <!-- Buttons -->
             <div class="flex justify-end space-x-4">
                 <button id="cancel-create-btn" class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-full">
@@ -269,6 +291,28 @@
                     <option value="custom">Custom</option>
                 </select>
                 <input type="number" id="edit-custom-expiration-days" placeholder="Enter days" class="hidden mt-2 w-full border border-gray-300 rounded p-2 text-base font-sans">
+            </div>
+
+            <!-- Note Visibility Options -->
+            <div class="mb-6">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Note Visibility:</label>
+                <div class="flex flex-col space-y-2">
+                    <div class="flex items-center">
+                        <input type="radio" id="edit-visibility-me" name="edit-note-visibility" value="me" class="form-radio" checked>
+                        <label for="edit-visibility-me" class="ml-2">Only Me</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="radio" id="edit-visibility-specific" name="edit-note-visibility" value="specific" class="form-radio">
+                        <label for="edit-visibility-specific" class="ml-2">Specific User IDs</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="radio" id="edit-visibility-everyone" name="edit-note-visibility" value="everyone" class="form-radio">
+                        <label for="edit-visibility-everyone" class="ml-2">Everyone</label>
+                    </div>
+                </div>
+                <div id="edit-specific-users-input-container" class="hidden mt-2">
+                    <textarea id="edit-specific-users-input" placeholder="Enter comma-separated user IDs" class="w-full h-24 border border-gray-300 rounded p-2 text-sm font-sans resize-none"></textarea>
+                </div>
             </div>
 
             <!-- Buttons -->
@@ -377,8 +421,18 @@
         const createdAtSpan = document.getElementById('created-at');
         const expiresAtSpan = document.getElementById('expires-at');
         const permissionStatusSpan = document.getElementById('permission-status');
-        const noteNotFoundMessage = document.getElementById('note-not-found');
-
+        const noteMessage = document.getElementById('note-message');
+        const visibilityMeRadio = document.getElementById('visibility-me');
+        const visibilitySpecificRadio = document.getElementById('visibility-specific');
+        const visibilityEveryoneRadio = document.getElementById('visibility-everyone');
+        const specificUsersInputContainer = document.getElementById('specific-users-input-container');
+        const specificUsersInput = document.getElementById('specific-users-input');
+        const editVisibilityMeRadio = document.getElementById('edit-visibility-me');
+        const editVisibilitySpecificRadio = document.getElementById('edit-visibility-specific');
+        const editVisibilityEveryoneRadio = document.getElementById('edit-visibility-everyone');
+        const editSpecificUsersInputContainer = document.getElementById('edit-specific-users-input-container');
+        const editSpecificUsersInput = document.getElementById('edit-specific-users-input');
+        
         let db;
         let auth;
         let noteRef;
@@ -429,7 +483,7 @@
                         
                         // Set up the real-time listener for the note content
                         onSnapshot(noteRef, (docSnap) => {
-                            noteNotFoundMessage.classList.add('hidden');
+                            noteMessage.classList.add('hidden');
                             shimmer.style.display = 'none';
                             noteTextarea.style.display = 'block';
 
@@ -439,11 +493,33 @@
                                 const isExpired = currentNoteData.expiresAt && Date.now() > currentNoteData.expiresAt;
                                 const editableBy = currentNoteData.editableBy;
                                 const ownerId = currentNoteData.ownerId;
+                                const visibility = currentNoteData.visibility || 'everyone';
+                                const allowedUsers = currentNoteData.allowedUsers || [];
                                 let readOnly = true;
                                 let permissionMessage = '';
                                 
+                                // Check if user has permission to view the note
+                                const canView = (() => {
+                                    if (visibility === 'me') {
+                                        return ownerId === auth.currentUser.uid;
+                                    } else if (visibility === 'specific') {
+                                        return allowedUsers.includes(auth.currentUser.uid);
+                                    } else {
+                                        return true; // everyone
+                                    }
+                                })();
+                                
+                                if (!canView) {
+                                    noteTextarea.style.display = 'none';
+                                    shimmer.style.display = 'none';
+                                    noteMessage.textContent = 'This note is private.';
+                                    noteMessage.classList.remove('hidden');
+                                    editPropertiesBtn.classList.add('hidden');
+                                    return;
+                                }
+
                                 // Show/hide edit properties button based on ownership and editability
-                                if (isCustomNote && isNoteEditable && ownerId === auth.currentUser.uid) {
+                                if (isCustomNote && !isExpired && isNoteEditable && ownerId === auth.currentUser.uid) {
                                     editPropertiesBtn.classList.remove('hidden');
                                 } else {
                                     editPropertiesBtn.classList.add('hidden');
@@ -514,7 +590,8 @@
                                 if (isCustomNote) {
                                     shimmer.style.display = 'block'; // Keep shimmer visible as requested
                                     noteTextarea.style.display = 'none';
-                                    noteNotFoundMessage.classList.remove('hidden');
+                                    noteMessage.textContent = 'This note does not exist.';
+                                    noteMessage.classList.remove('hidden');
                                     noteStatus.classList.add('hidden');
                                     editPropertiesBtn.classList.add('hidden');
                                     console.log("Custom note document does not exist.");
@@ -528,7 +605,8 @@
                         }, (error) => {
                             shimmer.style.display = 'none';
                             noteTextarea.style.display = 'block';
-                            noteNotFoundMessage.classList.remove('hidden');
+                            noteMessage.textContent = 'Failed to load note due to an error.';
+                            noteMessage.classList.remove('hidden');
                             editPropertiesBtn.classList.add('hidden');
                             console.error("Error listening to Firestore:", error);
                             noteTextarea.placeholder = 'Failed to load note due to an error.';
@@ -595,6 +673,20 @@
 
         // --- Modal and Button Logic ---
 
+        // Show/hide specific users input based on radio selection
+        const setupVisibilityListeners = (visibilityName, inputContainerId) => {
+            document.querySelector(`input[name="${visibilityName}"][value="specific"]`).addEventListener('change', (event) => {
+                if (event.target.checked) {
+                    document.getElementById(inputContainerId).classList.remove('hidden');
+                }
+            });
+            document.querySelector(`input[name="${visibilityName}"][value="me"]`).addEventListener('change', () => document.getElementById(inputContainerId).classList.add('hidden'));
+            document.querySelector(`input[name="${visibilityName}"][value="everyone"]`).addEventListener('change', () => document.getElementById(inputContainerId).classList.add('hidden'));
+        };
+
+        setupVisibilityListeners('note-visibility', 'specific-users-input-container');
+        setupVisibilityListeners('edit-note-visibility', 'edit-specific-users-input-container');
+
         // Create Note Modal
         createNoteBtn.addEventListener('click', () => {
             createNoteModal.classList.remove('hidden');
@@ -619,6 +711,20 @@
             } else {
                 editEditableByEveryoneRadio.checked = true;
             }
+            
+            // Populate visibility fields
+            const visibilityRadios = document.querySelectorAll('input[name="edit-note-visibility"]');
+            visibilityRadios.forEach(radio => {
+                if (radio.value === currentNoteData.visibility) {
+                    radio.checked = true;
+                }
+            });
+            if (currentNoteData.visibility === 'specific') {
+                editSpecificUsersInputContainer.classList.remove('hidden');
+                editSpecificUsersInput.value = currentNoteData.allowedUsers ? currentNoteData.allowedUsers.join(', ') : '';
+            } else {
+                editSpecificUsersInputContainer.classList.add('hidden');
+            }
 
             // Populate expiration fields
             if (currentNoteData.expiresAt === null) {
@@ -630,7 +736,7 @@
                 let foundPreset = false;
                 const presets = [1, 3, 5, 7];
                 for (let preset of presets) {
-                    if (daysUntilExpiration <= preset) {
+                    if (daysUntilExpiration <= preset && daysUntilExpiration > 0) {
                         editExpirationSelect.value = preset;
                         foundPreset = true;
                         break;
@@ -772,15 +878,28 @@
             const editableBy = isEditable ? (editableByMeRadio.checked ? 'me' : 'everyone') : null;
             const ownerId = isEditable && editableBy === 'me' ? auth.currentUser.uid : null;
 
+            // Get visibility and allowed users
+            const visibility = document.querySelector('input[name="note-visibility"]:checked').value;
+            let allowedUsers = [];
+            if (visibility === 'specific') {
+                allowedUsers = specificUsersInput.value.split(',').map(id => id.trim()).filter(id => id.length > 0);
+            }
+            if (visibility === 'me') {
+                allowedUsers.push(auth.currentUser.uid);
+            }
+
+
             try {
                 await setDoc(newNoteRef, {
                     text: noteContent,
                     color: selectedColor,
                     isEditable: isEditable,
                     editableBy: editableBy,
-                    ownerId: ownerId,
+                    ownerId: auth.currentUser.uid,
                     createdAt: now,
-                    expiresAt: expiresAt
+                    expiresAt: expiresAt,
+                    visibility: visibility,
+                    allowedUsers: allowedUsers
                 });
                 console.log("Custom note created with ID:", newNoteId);
                 const redirectUrl = `https://githubuser102234.github.io/StickyNote/?customid=${newNoteId}`;
@@ -809,11 +928,22 @@
                 newExpiresAt = now + (parseInt(expirationOption) * millisecondsInDay);
             }
 
+            // Get new visibility and allowed users
+            const newVisibility = document.querySelector('input[name="edit-note-visibility"]:checked').value;
+            let newAllowedUsers = [];
+            if (newVisibility === 'specific') {
+                newAllowedUsers = editSpecificUsersInput.value.split(',').map(id => id.trim()).filter(id => id.length > 0);
+            } else if (newVisibility === 'me') {
+                newAllowedUsers.push(auth.currentUser.uid);
+            }
+            
             try {
                 await setDoc(noteRef, {
                     color: newColor,
                     editableBy: newEditableBy,
-                    expiresAt: newExpiresAt
+                    expiresAt: newExpiresAt,
+                    visibility: newVisibility,
+                    allowedUsers: newAllowedUsers
                 }, { merge: true });
                 console.log("Note properties updated successfully.");
                 editPropertiesModal.classList.add('hidden');
