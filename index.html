@@ -130,6 +130,11 @@
         
         <!-- Note Text Area (initially hidden) -->
         <textarea id="note-text" class="hidden" placeholder="Start writing here..."></textarea>
+
+        <!-- Note not found message -->
+        <div id="note-not-found" class="hidden text-center text-red-500 font-bold mt-4">
+            This note does not exist.
+        </div>
     </div>
 
     <!-- Timestamp and expiration status for custom notes -->
@@ -252,6 +257,7 @@
         const createdAtSpan = document.getElementById('created-at');
         const expiresAtSpan = document.getElementById('expires-at');
         const permissionStatusSpan = document.getElementById('permission-status');
+        const noteNotFoundMessage = document.getElementById('note-not-found');
 
         let db;
         let auth;
@@ -301,6 +307,7 @@
                         
                         // Set up the real-time listener for the note content
                         onSnapshot(noteRef, (docSnap) => {
+                            noteNotFoundMessage.classList.add('hidden');
                             shimmer.style.display = 'none';
                             noteTextarea.style.display = 'block';
 
@@ -374,15 +381,26 @@
 
                                 console.log("Document data received:", data.text);
                             } else {
-                                console.log("No document found, creating a new one.");
-                                noteTextarea.value = '';
-                                setDoc(noteRef, { text: "", color: selectedColor, isEditable: true, editableBy: 'everyone', ownerId: null, createdAt: Date.now(), expiresAt: null });
+                                // Handle case where custom note document does not exist
+                                if (isCustomNote) {
+                                    shimmer.style.display = 'block'; // Keep shimmer visible as requested
+                                    noteTextarea.style.display = 'none';
+                                    noteNotFoundMessage.classList.remove('hidden');
+                                    noteStatus.classList.add('hidden');
+                                    console.log("Custom note document does not exist.");
+                                } else {
+                                    // For the main note, create it if it doesn't exist
+                                    console.log("No document found, creating a new one.");
+                                    noteTextarea.value = '';
+                                    setDoc(noteRef, { text: "", color: selectedColor, isEditable: true, editableBy: 'everyone', ownerId: null, createdAt: Date.now(), expiresAt: null });
+                                }
                             }
                         }, (error) => {
                             shimmer.style.display = 'none';
                             noteTextarea.style.display = 'block';
+                            noteNotFoundMessage.classList.remove('hidden');
                             console.error("Error listening to Firestore:", error);
-                            noteTextarea.placeholder = 'Failed to load note.';
+                            noteTextarea.placeholder = 'Failed to load note due to an error.';
                             noteTextarea.disabled = true;
                         });
                     } else {
