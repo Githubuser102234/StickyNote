@@ -122,6 +122,11 @@
     <button id="create-note-btn" class="absolute top-4 right-4 bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-full shadow-lg transition-transform transform hover:scale-105">
         Create Custom Sticky Note
     </button>
+    
+    <!-- Button for editing custom note properties (hidden by default) -->
+    <button id="edit-properties-btn" class="absolute top-4 right-4 bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-full shadow-lg transition-transform transform hover:scale-105 hidden">
+        Edit Note Properties
+    </button>
 
     <!-- Main Note Container -->
     <div id="sticky-note" class="note">
@@ -220,11 +225,76 @@
         </div>
     </div>
 
+    <!-- Edit Properties Modal (hidden by default) -->
+    <div id="edit-properties-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 class="text-2xl font-bold mb-4">Edit Note Properties</h2>
+            
+            <!-- Color Selection -->
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Note Color:</label>
+                <div id="edit-color-palette" class="color-palette flex flex-wrap">
+                    <button data-color="#fff3c9" class="bg-[#fff3c9]"></button>
+                    <button data-color="#c9f1ff" class="bg-[#c9f1ff]"></button>
+                    <button data-color="#d9ffc9" class="bg-[#d9ffc9]"></button>
+                    <button data-color="#ffc9d9" class="bg-[#ffc9d9]"></button>
+                    <button data-color="#ffc9f1" class="bg-[#ffc9f1]"></button>
+                </div>
+            </div>
+
+            <!-- Editable By options -->
+            <div class="mb-6">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Editable By:</label>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center">
+                        <input type="radio" id="edit-editable-by-me" name="edit-editable-by" value="me" class="form-radio">
+                        <label for="edit-editable-by-me" class="ml-2">Only Me</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="radio" id="edit-editable-by-everyone" name="edit-editable-by" value="everyone" class="form-radio">
+                        <label for="edit-editable-by-everyone" class="ml-2">Everyone</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Buttons -->
+            <div class="flex justify-between space-x-4">
+                <button id="delete-note-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-full">
+                    Delete Note
+                </button>
+                <div class="flex space-x-4">
+                    <button id="cancel-edit-btn" class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-full">
+                        Cancel
+                    </button>
+                    <button id="save-edit-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full">
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Delete Confirmation Modal (hidden by default) -->
+    <div id="delete-confirm-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 class="text-xl font-bold mb-4">Are you sure you want to delete this note?</h2>
+            <p class="mb-6">This action cannot be undone.</p>
+            <div class="flex justify-end space-x-4">
+                <button id="confirm-delete-yes" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-full">
+                    Yes, Delete
+                </button>
+                <button id="confirm-delete-no" class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-full">
+                    No, Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         // Import the functions you need from the SDKs you need
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        import { getFirestore, doc, onSnapshot, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
         
         // Firebase configuration hardcoded for GitHub Pages
         const firebaseConfig = {
@@ -242,17 +312,28 @@
         const shimmer = document.getElementById('shimmer');
         const userIdSpan = document.getElementById('user-id');
         const createNoteBtn = document.getElementById('create-note-btn');
+        const editPropertiesBtn = document.getElementById('edit-properties-btn');
         const createNoteModal = document.getElementById('create-note-modal');
+        const editPropertiesModal = document.getElementById('edit-properties-modal');
+        const deleteConfirmModal = document.getElementById('delete-confirm-modal');
         const cancelCreateBtn = document.getElementById('cancel-create-btn');
+        const cancelEditBtn = document.getElementById('cancel-edit-btn');
+        const confirmDeleteYesBtn = document.getElementById('confirm-delete-yes');
+        const confirmDeleteNoBtn = document.getElementById('confirm-delete-no');
+        const saveEditBtn = document.getElementById('save-edit-btn');
         const createBtn = document.getElementById('create-btn');
         const customNoteTextarea = document.getElementById('custom-note-text');
         const colorPalette = document.getElementById('color-palette');
+        const editColorPalette = document.getElementById('edit-color-palette');
         const expirationSelect = document.getElementById('expiration-select');
         const customExpirationInput = document.getElementById('custom-expiration-days');
         const editableCheckbox = document.getElementById('editable-checkbox');
         const editableOptionsDiv = document.getElementById('editable-options');
         const editableByMeRadio = document.getElementById('editable-by-me');
         const editableByEveryoneRadio = document.getElementById('editable-by-everyone');
+        const editEditableByMeRadio = document.getElementById('edit-editable-by-me');
+        const editEditableByEveryoneRadio = document.getElementById('edit-editable-by-everyone');
+        const deleteNoteBtn = document.getElementById('delete-note-btn');
         const noteStatus = document.getElementById('note-status');
         const createdAtSpan = document.getElementById('created-at');
         const expiresAtSpan = document.getElementById('expires-at');
@@ -265,6 +346,7 @@
         let debouncedSave;
         let isCustomNote = false;
         let selectedColor = '#fff3c9';
+        let currentNoteData = {};
 
         // Debounce function to limit Firestore writes
         function debounce(func, delay) {
@@ -303,6 +385,7 @@
                         } else {
                             noteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/sticky-notes/main-note`);
                             noteStatus.classList.add('hidden'); // Hide status on main note
+                            editPropertiesBtn.classList.add('hidden');
                         }
                         
                         // Set up the real-time listener for the note content
@@ -312,13 +395,20 @@
                             noteTextarea.style.display = 'block';
 
                             if (docSnap.exists()) {
-                                const data = docSnap.data();
-                                const isNoteEditable = data.isEditable;
-                                const isExpired = data.expiresAt && Date.now() > data.expiresAt;
-                                const editableBy = data.editableBy;
-                                const ownerId = data.ownerId;
+                                currentNoteData = docSnap.data();
+                                const isNoteEditable = currentNoteData.isEditable;
+                                const isExpired = currentNoteData.expiresAt && Date.now() > currentNoteData.expiresAt;
+                                const editableBy = currentNoteData.editableBy;
+                                const ownerId = currentNoteData.ownerId;
                                 let readOnly = true;
                                 let permissionMessage = '';
+                                
+                                // Show/hide edit properties button based on ownership and editability
+                                if (isCustomNote && isNoteEditable && ownerId === auth.currentUser.uid) {
+                                    editPropertiesBtn.classList.remove('hidden');
+                                } else {
+                                    editPropertiesBtn.classList.add('hidden');
+                                }
 
                                 // Determine if the note is editable based on the new fields
                                 if (!isExpired && isNoteEditable) {
@@ -344,11 +434,11 @@
                                     noteTextarea.classList.remove('read-only');
                                 }
                                 
-                                noteContainer.style.backgroundColor = data.color || selectedColor;
+                                noteContainer.style.backgroundColor = currentNoteData.color || selectedColor;
 
                                 if (isCustomNote) {
                                     noteStatus.classList.remove('hidden');
-                                    const createdAt = data.createdAt ? new Date(data.createdAt).toLocaleString() : 'N/A';
+                                    const createdAt = currentNoteData.createdAt ? new Date(currentNoteData.createdAt).toLocaleString() : 'N/A';
                                     createdAtSpan.textContent = createdAt;
 
                                     if (isExpired) {
@@ -359,9 +449,9 @@
                                         expiresAtSpan.classList.remove('text-gray-700');
                                         permissionStatusSpan.textContent = '';
                                     } else {
-                                        noteTextarea.value = data.text || '';
-                                        if (data.expiresAt) {
-                                            const expirationDate = new Date(data.expiresAt).toLocaleString();
+                                        noteTextarea.value = currentNoteData.text || '';
+                                        if (currentNoteData.expiresAt) {
+                                            const expirationDate = new Date(currentNoteData.expiresAt).toLocaleString();
                                             expiresAtSpan.textContent = expirationDate;
                                             expiresAtSpan.classList.add('text-gray-700');
                                             expiresAtSpan.classList.remove('text-red-500');
@@ -374,12 +464,12 @@
                                     }
                                 } else {
                                     // Main note is always editable
-                                    noteTextarea.value = data.text || '';
+                                    noteTextarea.value = currentNoteData.text || '';
                                     noteTextarea.readOnly = false;
                                     noteTextarea.classList.remove('read-only');
                                 }
 
-                                console.log("Document data received:", data.text);
+                                console.log("Document data received:", currentNoteData.text);
                             } else {
                                 // Handle case where custom note document does not exist
                                 if (isCustomNote) {
@@ -387,6 +477,7 @@
                                     noteTextarea.style.display = 'none';
                                     noteNotFoundMessage.classList.remove('hidden');
                                     noteStatus.classList.add('hidden');
+                                    editPropertiesBtn.classList.add('hidden');
                                     console.log("Custom note document does not exist.");
                                 } else {
                                     // For the main note, create it if it doesn't exist
@@ -399,6 +490,7 @@
                             shimmer.style.display = 'none';
                             noteTextarea.style.display = 'block';
                             noteNotFoundMessage.classList.remove('hidden');
+                            editPropertiesBtn.classList.add('hidden');
                             console.error("Error listening to Firestore:", error);
                             noteTextarea.placeholder = 'Failed to load note due to an error.';
                             noteTextarea.disabled = true;
@@ -462,7 +554,9 @@
         // Add event listener for text input on the note
         noteTextarea.addEventListener('input', debouncedSave);
 
-        // Modal and Button Logic
+        // --- Modal and Button Logic ---
+
+        // Create Note Modal
         createNoteBtn.addEventListener('click', () => {
             createNoteModal.classList.remove('hidden');
         });
@@ -471,12 +565,67 @@
             createNoteModal.classList.add('hidden');
         });
 
+        // Edit Properties Modal
+        editPropertiesBtn.addEventListener('click', () => {
+            // Populate the modal with current note data
+            const colorButtons = editColorPalette.querySelectorAll('button');
+            colorButtons.forEach(btn => {
+                btn.classList.remove('selected');
+                if (btn.dataset.color === currentNoteData.color) {
+                    btn.classList.add('selected');
+                }
+            });
+            if (currentNoteData.editableBy === 'me') {
+                editEditableByMeRadio.checked = true;
+            } else {
+                editEditableByEveryoneRadio.checked = true;
+            }
+            
+            editPropertiesModal.classList.remove('hidden');
+        });
+
+        cancelEditBtn.addEventListener('click', () => {
+            editPropertiesModal.classList.add('hidden');
+        });
+        
+        // Delete Confirmation Modal
+        deleteNoteBtn.addEventListener('click', () => {
+            editPropertiesModal.classList.add('hidden');
+            deleteConfirmModal.classList.remove('hidden');
+        });
+        
+        confirmDeleteNoBtn.addEventListener('click', () => {
+            deleteConfirmModal.classList.add('hidden');
+            editPropertiesModal.classList.remove('hidden');
+        });
+
+        confirmDeleteYesBtn.addEventListener('click', async () => {
+            try {
+                await deleteDoc(noteRef);
+                console.log("Note deleted successfully.");
+                window.location.href = 'https://githubuser102234.github.io/StickyNote/';
+            } catch (error) {
+                console.error("Error deleting note:", error);
+                deleteConfirmModal.classList.add('hidden');
+                editPropertiesModal.classList.remove('hidden');
+            }
+        });
+
+        // Color palette selection
         colorPalette.addEventListener('click', (event) => {
             const target = event.target;
             if (target.tagName === 'BUTTON') {
                 document.querySelectorAll('#color-palette button').forEach(btn => btn.classList.remove('selected'));
                 target.classList.add('selected');
                 selectedColor = target.dataset.color;
+            }
+        });
+
+        editColorPalette.addEventListener('click', (event) => {
+            const target = event.target;
+            if (target.tagName === 'BUTTON') {
+                document.querySelectorAll('#edit-color-palette button').forEach(btn => btn.classList.remove('selected'));
+                target.classList.add('selected');
             }
         });
 
@@ -537,6 +686,25 @@
                 window.location.href = redirectUrl;
             } catch (error) {
                 console.error("Error creating custom note:", error);
+            }
+        });
+
+        saveEditBtn.addEventListener('click', async () => {
+            const newColor = document.querySelector('#edit-color-palette button.selected').dataset.color;
+            const newEditableBy = document.querySelector('input[name="edit-editable-by"]:checked').value;
+            
+            try {
+                await setDoc(noteRef, {
+                    color: newColor,
+                    editableBy: newEditableBy,
+                    // OwnerId and isEditable are set at creation. No need to change them.
+                    // isEditable remains true for the purpose of this edit functionality.
+                    // ownerId is unchanged.
+                }, { merge: true });
+                console.log("Note properties updated successfully.");
+                editPropertiesModal.classList.add('hidden');
+            } catch (error) {
+                console.error("Error saving note properties:", error);
             }
         });
 
