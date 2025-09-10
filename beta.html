@@ -529,6 +529,7 @@
         let selectedColor = '#fff3c9';
         let currentNoteData = {};
         let currentNoteId = null;
+        let lastUpdatedTimestamp = null;
         let isNotificationEnabled = false;
 
         // Debounce function to limit Firestore writes
@@ -585,6 +586,14 @@
                                 const ownerId = currentNoteData.ownerId;
                                 const visibility = currentNoteData.visibility || 'everyone';
                                 const allowedUsers = currentNoteData.allowedUsers || [];
+                                const currentUpdated = currentNoteData.lastUpdated;
+
+                                // Check if the note has been updated since the last check
+                                if (lastUpdatedTimestamp !== null && lastUpdatedTimestamp !== currentUpdated) {
+                                    showNoteUpdatedNotification(currentNoteId);
+                                }
+                                lastUpdatedTimestamp = currentUpdated; // Update the timestamp
+                                
                                 let readOnly = true;
                                 let permissionMessage = '';
                                 
@@ -675,13 +684,6 @@
                                 }
 
                                 console.log("Document data received:", currentNoteData.text);
-                                
-                                // Check if the note content actually changed before showing a notification
-                                if (isCustomNote && lastKnownText !== undefined && lastKnownText !== currentNoteData.text) {
-                                    showNoteUpdatedNotification(currentNoteId);
-                                }
-                                lastKnownText = currentNoteData.text;
-
                             } else {
                                 // Handle case where custom note document does not exist
                                 if (isCustomNote) {
@@ -755,11 +757,11 @@
                         console.warn("Cannot save: This 'Only Me' note can only be edited by its creator.");
                         return;
                     }
-                    await setDoc(noteRef, { text: noteTextarea.value }, { merge: true });
+                    await setDoc(noteRef, { text: noteTextarea.value, lastUpdated: Date.now() }, { merge: true });
                     console.log("Note saved successfully.");
                 } else if (!isCustomNote) {
                     // This is the main note, always editable
-                    await setDoc(noteRef, { text: noteTextarea.value }, { merge: true });
+                    await setDoc(noteRef, { text: noteTextarea.value, lastUpdated: Date.now() }, { merge: true });
                     console.log("Main note saved successfully.");
                 } else {
                     console.warn("Cannot save: This note is not editable.");
@@ -1004,7 +1006,8 @@
                     createdAt: now,
                     expiresAt: expiresAt,
                     visibility: visibility,
-                    allowedUsers: allowedUsers
+                    allowedUsers: allowedUsers,
+                    lastUpdated: Date.now()
                 });
                 console.log("Custom note created with ID:", newNoteId);
                 const redirectUrl = `https://githubuser102234.github.io/StickyNote/?customid=${newNoteId}`;
@@ -1050,7 +1053,8 @@
                     editableBy: newEditableBy,
                     expiresAt: newExpiresAt,
                     visibility: newVisibility,
-                    allowedUsers: newAllowedUsers
+                    allowedUsers: newAllowedUsers,
+                    lastUpdated: Date.now()
                 }, { merge: true });
                 console.log("Note properties updated successfully.");
                 editPropertiesModal.classList.add('hidden');
@@ -1129,7 +1133,7 @@
         
         // Function to show the push notification
         const showNoteUpdatedNotification = (noteId) => {
-            if (isNotificationEnabled && Notification.permission === 'granted') {
+            if (Notification.permission === 'granted') {
                 const title = 'A note was updated!';
                 const options = {
                     body: 'Click here to check it.',
@@ -1138,7 +1142,14 @@
                         url: `${window.location.origin}/?customid=${noteId}`
                     }
                 };
-                new Notification(title, options);
+                const notification = new Notification(title, options);
+
+                // Add an event listener to the notification to redirect the user on click
+                notification.onclick = (event) => {
+                    event.preventDefault(); // Prevent the browser from opening a new tab
+                    window.focus(); // Focus the current window
+                    window.location.href = event.target.data.url; // Redirect to the note's URL
+                };
             }
         };
 
@@ -1280,47 +1291,6 @@
                 notificationNotesList.innerHTML = '<li>Error loading notifications.</li>';
             }
         };
-
-
-        let lastKnownText; // Variable to store the last known note text
-
-        // Add a listener to handle clicks on the notification
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.addEventListener('message', event => {
-                if (event.data && event.data.action === 'note-updated') {
-                    // This is where you would handle the event if you were using a Service Worker
-                    // to show the notification. Since we're doing it in the main script,
-                    // this part is illustrative.
-                    console.log('Received message from Service Worker:', event.data);
-                }
-            });
-        }
-        
-        // Listen for notification clicks to redirect the user
-        // This part needs to be in a service worker for background behavior.
-        // For a simple example, we'll add a listener to the main document.
-        // In a real app, this would be handled by the service worker's 'notificationclick' event.
-        if ('Notification' in window) {
-            document.addEventListener('DOMContentLoaded', () => {
-                if ('serviceWorker' in navigator && Notification.permission === 'granted') {
-                    // This is an example of what would go in a service worker to open the URL
-                    // self.addEventListener('notificationclick', event => {
-                    //     event.notification.close();
-                    //     const urlToOpen = event.notification.data.url;
-                    //     event.waitUntil(clients.matchAll({ type: 'window' }).then(windowClients => {
-                    //         for (const client of windowClients) {
-                    //             if (client.url === urlToOpen && 'focus' in client) {
-                    //                 return client.focus();
-                    //             }
-                    //         }
-                    //         if (clients.openWindow) {
-                    //             return clients.openWindow(urlToOpen);
-                    //         }
-                    //     }));
-                    // });
-                }
-            });
-        }
 
         window.onload = () => {
             initializeFirebase();
