@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.3/css/all.min.css">
     <style>
         body {
             font-family: 'Permanent Marker', cursive;
@@ -452,6 +452,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
         import { getFirestore, doc, onSnapshot, setDoc, getDoc, deleteDoc, collection, query, where, getDocs, onSnapshot as onSnapshotCollection } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        import { getMessaging, getToken, deleteToken } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-messaging.js";
         
         // Firebase configuration hardcoded for GitHub Pages
         const firebaseConfig = {
@@ -522,6 +523,7 @@
 
         let db;
         let auth;
+        let messaging;
         let noteRef;
         let debouncedSave;
         let isCustomNote = false;
@@ -545,6 +547,21 @@
                 const app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
+                
+                // Initialize Firebase Messaging and request a service worker
+                if ('serviceWorker' in navigator) {
+                    messaging = getMessaging(app);
+                    try {
+                        const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+                        console.log('Service Worker registered successfully.');
+                        // Use the registration object for getToken()
+                        messaging.useServiceWorker(registration);
+                    } catch (error) {
+                        console.error('Service Worker registration failed:', error);
+                    }
+                } else {
+                    console.warn('Service Workers are not supported in this browser.');
+                }
 
                 // Check for a custom ID in the URL
                 const urlParams = new URLSearchParams(window.location.search);
@@ -703,26 +720,7 @@
                             noteTextarea.placeholder = 'Failed to load note due to an error.';
                             noteTextarea.disabled = true;
                         });
-
-                        // Set up a listener for incoming notifications (simulated)
-                        if (isCustomNote) {
-                            onSnapshot(noteRef, (docSnap) => {
-                                if (docSnap.exists()) {
-                                    const note = docSnap.data();
-                                    const lastEditedBy = note.lastEditedBy;
-                                    if (lastEditedBy && lastEditedBy !== userId && isNotificationEnabled) {
-                                        const noteContent = note.text || '';
-                                        const truncatedText = noteContent.substring(0, 50) + '...';
-                                        showNoteUpdatedNotification(
-                                            currentNoteId,
-                                            'Note Updated!',
-                                            `A note you are following has been updated: ${truncatedText}`
-                                        );
-                                    }
-                                }
-                            });
-                        }
-
+                        
                         // Initial setup for the hamburger menu
                         if (user) {
                             populateHamburgerMenu(user.uid);
@@ -1082,54 +1080,49 @@
 
         // --- Push Notification & Hamburger Menu Logic ---
         
-        const showNoteUpdatedNotification = (noteId, title, body) => {
-            if (Notification.permission === 'granted') {
-                const options = {
-                    body: body || 'Click here to check it.',
-                    icon: 'https://i.ibb.co/b11xL08/favicon.png',
-                    data: {
-                        url: `${window.location.origin}/?customid=${noteId}`
-                    }
-                };
-                const notification = new Notification(title || 'A note was updated!', options);
-
-                notification.onclick = (event) => {
-                    event.preventDefault();
-                    window.focus();
-                    window.location.href = event.target.data.url;
-                };
-            }
-        };
-
-        const requestNotificationPermission = async () => {
-            const permission = await Notification.requestPermission();
-            if (permission !== 'granted') {
-                alert('Permission denied for push notifications.');
+        // This function will now register a push token
+        const subscribeToNoteNotifications = async (userId, noteId) => {
+            if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+                console.error("This browser does not support notifications or service workers.");
+                alert('Notifications are not supported in this browser.');
                 return false;
             }
-            return true;
-        };
 
-        const subscribeToNoteNotifications = async (userId, noteId) => {
-            const permissionGranted = await requestNotificationPermission();
-            if (!permissionGranted) return false;
+            if (Notification.permission !== 'granted') {
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    alert('Permission denied for push notifications.');
+                    return false;
+                }
+            }
 
             try {
-                const docRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/user-notifications/${userId}`);
-                const docSnap = await getDoc(docRef);
-                const currentNotes = docSnap.exists() ? docSnap.data().notes || [] : [];
-                if (!currentNotes.includes(noteId)) {
-                    currentNotes.push(noteId);
-                    await setDoc(docRef, { notes: currentNotes }, { merge: true });
+                const vapidKey = "BNjB6y_8b4Wl5s19g9Lh5h6U5QvV82h5t0m2w8S0s1N8T5r9y2V2Q4v3Q5S9m1u3"; // Replace with your actual VAPID key
+                const currentToken = await getToken(messaging, { vapidKey });
+                if (currentToken) {
+                    // Save the user's notification settings and the new token
+                    const userNotificationRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/user-notifications/${userId}`);
+                    const noteNotificationsRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/note-notifications/${noteId}`);
+
+                    // Save the note ID to the user's notifications list
+                    await setDoc(userNotificationRef, { notes: arrayUnion(noteId) }, { merge: true });
+
+                    // Save the token to the note's notification list
+                    await setDoc(noteNotificationsRef, { tokens: arrayUnion(currentToken) }, { merge: true });
+
+                    console.log("Subscribed to notifications for note:", noteId, "with token:", currentToken);
+                    return true;
+                } else {
+                    console.warn('No registration token available. Request permission to generate one.');
+                    return false;
                 }
-                console.log('Subscribed to notifications for note:', noteId);
-                return true;
             } catch (error) {
                 console.error('Error subscribing to notifications:', error);
                 return false;
             }
         };
 
+        // This function will now delete the push token
         const unsubscribeFromNoteNotifications = async (userId, noteId) => {
             try {
                 const docRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/user-notifications/${userId}`);
@@ -1166,7 +1159,7 @@
         });
 
         const updateNotificationButtonState = async (userId, noteId) => {
-            if (!noteId || !('Notification' in window)) {
+            if (!noteId || !('Notification' in window) || !('serviceWorker' in navigator)) {
                 notificationButton.style.display = 'none';
                 return;
             }
