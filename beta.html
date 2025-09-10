@@ -187,7 +187,6 @@
             transition: background-color 0.2s;
             text-decoration: none;
             color: #333;
-            font-size: 1rem;
             font-family: 'Permanent Marker', cursive;
         }
         #hamburger-menu-content a:hover, .disable-btn:hover {
@@ -220,13 +219,13 @@
             <i class="fas fa-bars"></i>
         </button>
         <div id="hamburger-menu-content" class="absolute top-16 left-0 p-4 rounded-lg shadow-xl">
-            <h3>Menu</h3>
+            <h3>My Notes</h3>
             <ul id="menu-note-list">
-                <li><a href="#" id="my-notes-placeholder">Your Notes</a></li>
+                <li>No notes found.</li>
             </ul>
-            <h3 class="mt-4">Push Notifications</h3>
+            <h3 class="mt-4">Notifications Enabled</h3>
             <ul id="notification-note-list">
-                <li><a href="#" id="push-notes-placeholder">Your Push Notification Notes</a></li>
+                <li>No notifications enabled.</li>
             </ul>
         </div>
         <button id="notification-button" class="mt-2" style="display:none;">Enable Notifications</button>
@@ -452,7 +451,7 @@
         // Import the functions you need from the SDKs you need
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, setDoc, getDoc, deleteDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        import { getFirestore, doc, onSnapshot, setDoc, getDoc, deleteDoc, collection, query, where, getDocs, onSnapshot as onSnapshotCollection } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
         
         // Firebase configuration hardcoded for GitHub Pages
         const firebaseConfig = {
@@ -529,7 +528,6 @@
         let selectedColor = '#fff3c9';
         let currentNoteData = {};
         let currentNoteId = null;
-        let lastUpdatedTimestamp = null;
         let isNotificationEnabled = false;
 
         // Debounce function to limit Firestore writes
@@ -566,13 +564,14 @@
                             isCustomNote = true;
                             noteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/custom-notes/${currentNoteId}`);
                             createNoteBtn.classList.add('hidden'); // Hide the create button on custom notes
+                            editPropertiesBtn.classList.remove('hidden');
                         } else {
                             noteRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/sticky-notes/main-note`);
                             noteStatus.classList.add('hidden'); // Hide status on main note
                             editPropertiesBtn.classList.add('hidden');
                         }
                         
-                        // Set up the real-time listener for the note content
+                        // Set up the main real-time listener for the note content
                         onSnapshot(noteRef, (docSnap) => {
                             noteMessage.classList.add('hidden');
                             shimmer.style.display = 'none';
@@ -586,13 +585,6 @@
                                 const ownerId = currentNoteData.ownerId;
                                 const visibility = currentNoteData.visibility || 'everyone';
                                 const allowedUsers = currentNoteData.allowedUsers || [];
-                                const currentUpdated = currentNoteData.lastUpdated;
-
-                                // Check if the note has been updated since the last check
-                                if (lastUpdatedTimestamp !== null && lastUpdatedTimestamp !== currentUpdated) {
-                                    showNoteUpdatedNotification(currentNoteId);
-                                }
-                                lastUpdatedTimestamp = currentUpdated; // Update the timestamp
                                 
                                 let readOnly = true;
                                 let permissionMessage = '';
@@ -712,10 +704,26 @@
                             noteTextarea.disabled = true;
                         });
 
+                        // Set up the listener for incoming notifications (simulated)
+                        const userNotificationRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/user-notifications/${userId}`);
+                        onSnapshot(userNotificationRef, (docSnap) => {
+                            const data = docSnap.data();
+                            if (data && data.pendingNotifications) {
+                                data.pendingNotifications.forEach(notification => {
+                                    showNoteUpdatedNotification(notification.noteId, notification.title, notification.body);
+                                });
+                                // Clear the pending notifications after displaying them
+                                setDoc(userNotificationRef, { pendingNotifications: [] }, { merge: true });
+                            }
+                        });
+
+
                         // Initial setup for the hamburger menu
                         if (user) {
                             populateHamburgerMenu(user.uid);
-                            setupNotificationButton(user.uid, currentNoteId);
+                            if(currentNoteId) {
+                                updateNotificationButtonState(user.uid, currentNoteId);
+                            }
                         }
 
                     } else {
@@ -757,11 +765,11 @@
                         console.warn("Cannot save: This 'Only Me' note can only be edited by its creator.");
                         return;
                     }
-                    await setDoc(noteRef, { text: noteTextarea.value, lastUpdated: Date.now() }, { merge: true });
+                    await setDoc(noteRef, { text: noteTextarea.value, lastUpdated: Date.now(), lastEditedBy: auth.currentUser.uid }, { merge: true });
                     console.log("Note saved successfully.");
                 } else if (!isCustomNote) {
                     // This is the main note, always editable
-                    await setDoc(noteRef, { text: noteTextarea.value, lastUpdated: Date.now() }, { merge: true });
+                    await setDoc(noteRef, { text: noteTextarea.value, lastUpdated: Date.now(), lastEditedBy: auth.currentUser.uid }, { merge: true });
                     console.log("Main note saved successfully.");
                 } else {
                     console.warn("Cannot save: This note is not editable.");
@@ -907,7 +915,9 @@
         confirmExpireYesBtn.addEventListener('click', async () => {
             try {
                 await setDoc(noteRef, {
-                    expiresAt: Date.now()
+                    expiresAt: Date.now(),
+                    lastUpdated: Date.now(),
+                    lastEditedBy: auth.currentUser.uid
                 }, { merge: true });
                 console.log("Note expired successfully.");
                 expireConfirmModal.classList.add('hidden');
@@ -990,11 +1000,11 @@
             let allowedUsers = [];
             if (visibility === 'specific') {
                 const enteredIds = specificUsersInput.value.split(',').map(id => id.trim()).filter(id => id.length > 0);
+                // Ensure the current user's ID is always included
                 allowedUsers = [...new Set([auth.currentUser.uid, ...enteredIds])];
             } else if (visibility === 'me') {
                 allowedUsers.push(auth.currentUser.uid);
             }
-
 
             try {
                 await setDoc(newNoteRef, {
@@ -1007,7 +1017,8 @@
                     expiresAt: expiresAt,
                     visibility: visibility,
                     allowedUsers: allowedUsers,
-                    lastUpdated: Date.now()
+                    lastUpdated: Date.now(),
+                    lastEditedBy: auth.currentUser.uid
                 });
                 console.log("Custom note created with ID:", newNoteId);
                 const redirectUrl = `https://githubuser102234.github.io/StickyNote/?customid=${newNoteId}`;
@@ -1054,7 +1065,8 @@
                     expiresAt: newExpiresAt,
                     visibility: newVisibility,
                     allowedUsers: newAllowedUsers,
-                    lastUpdated: Date.now()
+                    lastUpdated: Date.now(),
+                    lastEditedBy: auth.currentUser.uid
                 }, { merge: true });
                 console.log("Note properties updated successfully.");
                 editPropertiesModal.classList.add('hidden');
@@ -1065,23 +1077,25 @@
 
         // --- Push Notification & Hamburger Menu Logic ---
         
-        // This is a placeholder for a real service worker registration
-        // In a real app, you would have a service worker file (e.g., sw.js)
-        // that handles the push notifications.
-        const registerServiceWorker = async () => {
-            if ('serviceWorker' in navigator) {
-                try {
-                    const registration = await navigator.serviceWorker.register('/sw.js');
-                    console.log('Service Worker registered with scope:', registration.scope);
-                    return registration;
-                } catch (error) {
-                    console.error('Service Worker registration failed:', error);
-                    return null;
-                }
+        const showNoteUpdatedNotification = (noteId, title, body) => {
+            if (Notification.permission === 'granted') {
+                const options = {
+                    body: body || 'Click here to check it.',
+                    icon: 'https://i.ibb.co/b11xL08/favicon.png',
+                    data: {
+                        url: `${window.location.origin}/?customid=${noteId}`
+                    }
+                };
+                const notification = new Notification(title || 'A note was updated!', options);
+
+                notification.onclick = (event) => {
+                    event.preventDefault();
+                    window.focus();
+                    window.location.href = event.target.data.url;
+                };
             }
-            return null;
         };
-        
+
         const requestNotificationPermission = async () => {
             const permission = await Notification.requestPermission();
             if (permission !== 'granted') {
@@ -1090,16 +1104,11 @@
             }
             return true;
         };
-        
-        // Simulating the subscription process. In a real app, this would send a
-        // subscription object to your server to be saved in a database.
-        const subscribeToNoteNotifications = async (userId, noteId) => {
-            const registration = await registerServiceWorker();
-            if (!registration) return;
 
-            // This is where you would subscribe for push notifications
-            // and send the subscription details to your backend.
-            // For this example, we'll just store the ID locally.
+        const subscribeToNoteNotifications = async (userId, noteId) => {
+            const permissionGranted = await requestNotificationPermission();
+            if (!permissionGranted) return false;
+
             try {
                 const docRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/user-notifications/${userId}`);
                 const docSnap = await getDoc(docRef);
@@ -1131,62 +1140,31 @@
             }
         };
         
-        // Function to show the push notification
-        const showNoteUpdatedNotification = (noteId) => {
-            if (Notification.permission === 'granted') {
-                const title = 'A note was updated!';
-                const options = {
-                    body: 'Click here to check it.',
-                    icon: 'https://i.ibb.co/b11xL08/favicon.png', // A simple icon for the notification
-                    data: {
-                        url: `${window.location.origin}/?customid=${noteId}`
-                    }
-                };
-                const notification = new Notification(title, options);
-
-                // Add an event listener to the notification to redirect the user on click
-                notification.onclick = (event) => {
-                    event.preventDefault(); // Prevent the browser from opening a new tab
-                    window.focus(); // Focus the current window
-                    window.location.href = event.target.data.url; // Redirect to the note's URL
-                };
-            }
-        };
-
-        // Event listener for notification button toggle
         notificationButton.addEventListener('click', async () => {
             if (isNotificationEnabled) {
-                // Disable notifications
                 const success = await unsubscribeFromNoteNotifications(auth.currentUser.uid, currentNoteId);
                 if (success) {
                     isNotificationEnabled = false;
                     notificationButton.textContent = 'Enable Notifications';
                     notificationButton.classList.add('off');
-                    console.log('Notifications disabled for this note.');
                     populateHamburgerMenu(auth.currentUser.uid);
                 }
             } else {
-                // Enable notifications
-                const permissionGranted = await requestNotificationPermission();
-                if (permissionGranted) {
-                    const success = await subscribeToNoteNotifications(auth.currentUser.uid, currentNoteId);
-                    if (success) {
-                        isNotificationEnabled = true;
-                        notificationButton.textContent = 'Disable Notifications';
-                        notificationButton.classList.remove('off');
-                        console.log('Notifications enabled for this note.');
-                        populateHamburgerMenu(auth.currentUser.uid);
-                    }
+                const success = await subscribeToNoteNotifications(auth.currentUser.uid, currentNoteId);
+                if (success) {
+                    isNotificationEnabled = true;
+                    notificationButton.textContent = 'Disable Notifications';
+                    notificationButton.classList.remove('off');
+                    populateHamburgerMenu(auth.currentUser.uid);
                 }
             }
         });
 
         const updateNotificationButtonState = async (userId, noteId) => {
-            if (!noteId || !('Notification' in window) || Notification.permission !== 'granted') {
+            if (!noteId || !('Notification' in window)) {
                 notificationButton.style.display = 'none';
                 return;
             }
-
             notificationButton.style.display = 'block';
             
             const docRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/user-notifications/${userId}`);
@@ -1205,7 +1183,7 @@
 
         // Hamburger menu toggle
         hamburgerMenuBtn.addEventListener('click', (event) => {
-            event.stopPropagation(); // Prevent the body click listener from firing immediately
+            event.stopPropagation();
             hamburgerMenuContent.style.display = hamburgerMenuContent.style.display === 'block' ? 'none' : 'block';
         });
 
@@ -1279,7 +1257,6 @@
                             const noteIdToDisable = event.target.dataset.noteId;
                             await unsubscribeFromNoteNotifications(userId, noteIdToDisable);
                             populateHamburgerMenu(userId);
-                            // Also update the button on the main note view if it's the current note
                             if (currentNoteId === noteIdToDisable) {
                                 updateNotificationButtonState(userId, currentNoteId);
                             }
@@ -1299,7 +1276,6 @@
             // Only show the notification button on custom notes
             if (customId) {
                 if ('Notification' in window) {
-                    notificationButton.style.display = 'block';
                     updateNotificationButtonState(auth.currentUser.uid, customId);
                 }
             }
