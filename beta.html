@@ -704,19 +704,24 @@
                             noteTextarea.disabled = true;
                         });
 
-                        // Set up the listener for incoming notifications (simulated)
-                        const userNotificationRef = doc(db, `artifacts/${firebaseConfig.projectId}/public/data/user-notifications/${userId}`);
-                        onSnapshot(userNotificationRef, (docSnap) => {
-                            const data = docSnap.data();
-                            if (data && data.pendingNotifications) {
-                                data.pendingNotifications.forEach(notification => {
-                                    showNoteUpdatedNotification(notification.noteId, notification.title, notification.body);
-                                });
-                                // Clear the pending notifications after displaying them
-                                setDoc(userNotificationRef, { pendingNotifications: [] }, { merge: true });
-                            }
-                        });
-
+                        // Set up a listener for incoming notifications (simulated)
+                        if (isCustomNote) {
+                            onSnapshot(noteRef, (docSnap) => {
+                                if (docSnap.exists()) {
+                                    const note = docSnap.data();
+                                    const lastEditedBy = note.lastEditedBy;
+                                    if (lastEditedBy && lastEditedBy !== userId && isNotificationEnabled) {
+                                        const noteContent = note.text || '';
+                                        const truncatedText = noteContent.substring(0, 50) + '...';
+                                        showNoteUpdatedNotification(
+                                            currentNoteId,
+                                            'Note Updated!',
+                                            `A note you are following has been updated: ${truncatedText}`
+                                        );
+                                    }
+                                }
+                            });
+                        }
 
                         // Initial setup for the hamburger menu
                         if (user) {
